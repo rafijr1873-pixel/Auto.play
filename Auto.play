@@ -602,39 +602,3 @@ game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
     isPlaying = false
     currentSection = ""
 end)
-
-------------------------------------------------------------
--- STARTUP MESSAGE
-------------------------------------------------------------
-print("\n")
-print("══════════════════════════════════════════════")
-print("  🥁  VIRTUAL DRUMS AUTO PLAYER")
-print("  🎵  + SLIPKNOT — EYELESS (142 BPM)")
-print("══════════════════════════════════════════════")
-print("  P  →  Start / Stop Pattern Loop")
-print("  O  →  Start / Stop EYELESS Song")
-print("  [  →  Ganti Pattern")
-print("  ]  →  BPM naik   (pattern +10 / eyeless +5)")
-print("  '  →  BPM turun  (pattern -10 / eyeless -5)")
-print("──────────────────────────────────────────────")
-print("  📋 Pattern Loop (" .. BPM .. " BPM):")
-for i, p in ipairs(PATTERNS) do
-    local arrow = (i == patternIndex) and "►" or " "
-    print(string.format("     %s %d. %s", arrow, i, p.name))
-end
-print("──────────────────────────────────────────────")
-print("  🎵 EYELESS Song Structure (" .. EYELESS.bpm .. " BPM):")
-print("")
-print("  🎬 Intro ──► 🎸 Verse 1 ──► 🔥 Chorus 1")
-print("       │")
-print("  🎸 Verse 2 ──► ⚡ Pre-Chorus ──► 🔥 Chorus 2")
-print("       │")
-print("  💀 Breakdown ──► 🔥 Final Chorus ──► 🏁 Outro")
-print("       │")
-print("       └──────── 🔄 Loop ────────────────────┘")
-print("")
-print("──────────────────────────────────────────────")
-print("  ⚠  Jika drum tidak bunyi, sesuaikan tabel")
-print("     KEYS di dalam script sesuai game!")
-print("══════════════════════════════════════════════")
-print("\n")
