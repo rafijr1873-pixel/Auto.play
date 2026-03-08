@@ -1,0 +1,1361 @@
+--[[
+╔═══════════════════════════════════════════════════════╗
+║   VIRTUAL DRUMS AUTO PLAYER + GUI                    ║
+║   + SLIPKNOT — EYELESS (Full Song)                   ║
+║   Game: Virtual Drums (ID: 6831290123)               ║
+╚═══════════════════════════════════════════════════════╝
+]]
+
+------------------------------------------------------------
+-- SERVICES
+------------------------------------------------------------
+local Players             = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService    = game:GetService("UserInputService")
+local TweenService        = game:GetService("TweenService")
+local RunService          = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+
+------------------------------------------------------------
+-- HAPUS GUI LAMA (biar bisa re-execute)
+------------------------------------------------------------
+if PlayerGui:FindFirstChild("DrumAutoPlayerGUI") then
+    PlayerGui:FindFirstChild("DrumAutoPlayerGUI"):Destroy()
+end
+
+------------------------------------------------------------
+-- KONFIGURASI
+------------------------------------------------------------
+local CONFIG = {
+    patternBPM   = 120,
+    eyelessBPM   = 142,
+    humanizeMax  = 0.020,
+    keyHoldTime  = 0.025,
+}
+
+------------------------------------------------------------
+-- KEY MAPPING DRUM
+------------------------------------------------------------
+local KEYS = {
+    kick      = Enum.KeyCode.Z,
+    snare     = Enum.KeyCode.X,
+    hihat     = Enum.KeyCode.C,
+    hihatOpen = Enum.KeyCode.V,
+    tom1      = Enum.KeyCode.J,
+    tom2      = Enum.KeyCode.K,
+    floorTom  = Enum.KeyCode.L,
+    crash     = Enum.KeyCode.Semicolon,
+    ride      = Enum.KeyCode.B,
+}
+
+------------------------------------------------------------
+-- STATE
+------------------------------------------------------------
+local STATE = {
+    isPlaying      = false,
+    mode           = "pattern",
+    patternIndex   = 1,
+    currentSection = "",
+    currentStep    = 0,
+    totalSteps     = 0,
+    barCount       = 0,
+    totalBars      = 0,
+}
+
+------------------------------------------------------------
+-- UTILITY FUNCTIONS
+------------------------------------------------------------
+local function sendKeyPress(keyCode, pressed)
+    local ok = pcall(function()
+        VirtualInputManager:SendKeyEvent(pressed, keyCode, false, game)
+    end)
+    if not ok then
+        pcall(function()
+            if pressed then keypress(keyCode) else keyrelease(keyCode) end
+        end)
+    end
+end
+
+local function hitDrums(drumNames)
+    if not drumNames or #drumNames == 0 then return end
+    for _, name in ipairs(drumNames) do
+        local kc = KEYS[name]
+        if kc then sendKeyPress(kc, true) end
+    end
+    task.wait(CONFIG.keyHoldTime)
+    for _, name in ipairs(drumNames) do
+        local kc = KEYS[name]
+        if kc then sendKeyPress(kc, false) end
+    end
+end
+
+local function humanize()
+    return math.random() * CONFIG.humanizeMax
+end
+
+------------------------------------------------------------
+-- PATTERNS
+------------------------------------------------------------
+local PATTERNS = {
+    {
+        name = "Simple Rock",
+        icon = "🪨",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+        }
+    },
+    {
+        name = "Driving Rock",
+        icon = "🚗",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"kick","hihat"},  {"kick","hihat"},
+            {"snare","hihat"}, {"hihat"},
+        }
+    },
+    {
+        name = "Disco",
+        icon = "🪩",
+        steps = {
+            {"kick","hihat"},            {"hihat"},
+            {"kick","snare","hihat"},    {"hihat"},
+            {"kick","hihat"},            {"hihat"},
+            {"kick","snare","hihat"},    {"hihat"},
+        }
+    },
+    {
+        name = "Half-Time",
+        icon = "🐢",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"hihat"},         {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"hihat"},         {"kick","hihat"},
+        }
+    },
+    {
+        name = "Ride Groove",
+        icon = "🔔",
+        steps = {
+            {"kick","ride"},  {"hihat"},
+            {"snare","ride"}, {"hihat"},
+            {"kick","ride"},  {"kick","hihat"},
+            {"snare","ride"}, {"hihat"},
+        }
+    },
+    {
+        name = "Tom Fill",
+        icon = "🥁",
+        steps = {
+            {"snare"},   {"snare"},
+            {"tom1"},    {"tom1"},
+            {"tom2"},    {"tom2"},
+            {"floorTom"},{"floorTom","crash"},
+        }
+    },
+    {
+        name = "Blast Beat",
+        icon = "💀",
+        steps = {
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+        }
+    },
+}
+
+------------------------------------------------------------
+-- EYELESS SECTIONS
+------------------------------------------------------------
+local EYELESS_SECTIONS = {}
+
+EYELESS_SECTIONS.intro1 = {
+    name = "Intro",
+    icon = "🎬",
+    steps = {
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+    }
+}
+
+EYELESS_SECTIONS.intro2 = {
+    name = "Intro Build",
+    icon = "🔨",
+    steps = {
+        {"kick","hihat"}, {}, {"hihat"}, {},
+        {"hihat"},        {}, {"hihat"}, {},
+        {"kick","hihat"}, {}, {"hihat"}, {},
+        {"hihat"},        {}, {"hihat"}, {},
+    }
+}
+
+EYELESS_SECTIONS.introCrash = {
+    name = "Intro Crash",
+    icon = "💥",
+    steps = {
+        {"kick","hihat"}, {},             {"kick","hihat"}, {"kick"},
+        {"hihat"},        {},             {"kick","hihat"}, {"kick"},
+        {"snare"},        {},             {"snare"},        {},
+        {"snare"},        {"snare"},      {"snare"},        {"snare","crash"},
+    }
+}
+
+EYELESS_SECTIONS.verse = {
+    name = "Verse",
+    icon = "🎸",
+    steps = {
+        {"kick","hihat"},  {},             {"kick","hihat"}, {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"}, {},
+        {"kick","hihat"},  {},             {"kick","hihat"}, {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"}, {},
+    }
+}
+
+EYELESS_SECTIONS.verse2 = {
+    name = "Verse Heavy",
+    icon = "🎸",
+    steps = {
+        {"kick","hihat"},  {},             {"kick","hihat"},  {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"},  {"kick"},
+        {"kick","hihat"},  {"kick"},       {"kick","hihat"},  {"kick"},
+        {"snare","hihat"}, {},             {"kick"},          {"kick"},
+    }
+}
+
+EYELESS_SECTIONS.prechorus = {
+    name = "Pre-Chorus",
+    icon = "⚡",
+    steps = {
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"kick"},          {"kick"},
+    }
+}
+
+EYELESS_SECTIONS.chorus = {
+    name = "Chorus",
+    icon = "🔥",
+    steps = {
+        {"kick","crash"},  {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+    }
+}
+
+EYELESS_SECTIONS.chorus2 = {
+    name = "Chorus End",
+    icon = "🔥",
+    steps = {
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"kick"},          {"kick","crash"},
+    }
+}
+
+EYELESS_SECTIONS.bridge = {
+    name = "Breakdown",
+    icon = "💀",
+    steps = {
+        {"kick","crash"},  {},             {},                {"kick"},
+        {},                {},             {"snare","crash"},  {},
+        {"kick"},          {},             {},                {"kick"},
+        {},                {"kick"},       {"snare","crash"},  {},
+    }
+}
+
+EYELESS_SECTIONS.bridge2 = {
+    name = "Breakdown Heavy",
+    icon = "💀",
+    steps = {
+        {"kick","crash"},  {},             {"kick"},          {},
+        {"kick"},          {},             {"snare","crash"},  {},
+        {"kick","crash"},  {},             {"snare"},         {},
+        {"kick"},          {"kick"},       {"snare","crash"},  {},
+    }
+}
+
+EYELESS_SECTIONS.fill = {
+    name = "Fill",
+    icon = "🥁",
+    steps = {
+        {"snare"},    {},          {"snare"},    {},
+        {"tom1"},     {},          {"tom1"},     {},
+        {"tom2"},     {},          {"tom2"},     {},
+        {"floorTom"}, {},          {"floorTom"}, {"crash"},
+    }
+}
+
+EYELESS_SECTIONS.fill2 = {
+    name = "Fill Aggressive",
+    icon = "🥁",
+    steps = {
+        {"snare"},    {"snare"},   {"snare"},    {"snare"},
+        {"tom1"},     {"tom1"},    {"tom2"},     {"tom2"},
+        {"floorTom"}, {"floorTom"},{"kick"},     {"kick"},
+        {"kick"},     {"kick"},    {"kick"},     {"crash"},
+    }
+}
+
+EYELESS_SECTIONS.outro = {
+    name = "Outro",
+    icon = "🏁",
+    steps = {
+        {"kick","crash"},  {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {},
+        {"snare"},         {},             {"snare","crash"},  {},
+    }
+}
+
+------------------------------------------------------------
+-- EYELESS STRUCTURE
+------------------------------------------------------------
+local EYELESS_STRUCTURE = {
+    { "intro1",     3 },
+    { "intro2",     4 },
+    { "introCrash", 1 },
+    { "verse",      6 },
+    { "verse2",     1 },
+    { "fill",       1 },
+    { "chorus",     6 },
+    { "chorus2",    1 },
+    { "fill2",      1 },
+    { "verse",      5 },
+    { "verse2",     1 },
+    { "prechorus",  2 },
+    { "fill",       1 },
+    { "chorus",     5 },
+    { "chorus2",    2 },
+    { "bridge",     4 },
+    { "bridge2",    3 },
+    { "fill2",      1 },
+    { "chorus",     5 },
+    { "chorus2",    2 },
+    { "fill",       1 },
+    { "outro",      4 },
+}
+
+-- Hitung total bars
+local totalEyelessBars = 0
+for _, v in ipairs(EYELESS_STRUCTURE) do
+    totalEyelessBars = totalEyelessBars + v[2]
+end
+
+------------------------------------------------------------
+--
+--        █▀▀ █░█ █
+--        █▄█ █▄█ █
+--
+------------------------------------------------------------
+
+-- Warna tema (dark metallic)
+local COLORS = {
+    bg          = Color3.fromRGB(18, 18, 22),
+    bgDark      = Color3.fromRGB(12, 12, 16),
+    panel       = Color3.fromRGB(28, 28, 35),
+    panelHover  = Color3.fromRGB(38, 38, 48),
+    accent      = Color3.fromRGB(220, 50, 50),    -- merah slipknot
+    accentGlow  = Color3.fromRGB(255, 80, 80),
+    green       = Color3.fromRGB(50, 200, 100),
+    greenDark   = Color3.fromRGB(30, 150, 70),
+    yellow      = Color3.fromRGB(255, 200, 50),
+    orange      = Color3.fromRGB(255, 140, 40),
+    textPrimary = Color3.fromRGB(240, 240, 245),
+    textSecondary = Color3.fromRGB(160, 160, 175),
+    textDim     = Color3.fromRGB(100, 100, 115),
+    border      = Color3.fromRGB(50, 50, 60),
+    borderLight = Color3.fromRGB(70, 70, 85),
+    white       = Color3.fromRGB(255, 255, 255),
+    black       = Color3.fromRGB(0, 0, 0),
+}
+
+-- ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DrumAutoPlayerGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+-- ═══ HELPER: Buat Instance ═══
+local function create(className, props, children)
+    local inst = Instance.new(className)
+    for k, v in pairs(props or {}) do
+        inst[k] = v
+    end
+    for _, child in ipairs(children or {}) do
+        child.Parent = inst
+    end
+    return inst
+end
+
+local function addCorner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = parent
+    return c
+end
+
+local function addStroke(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or COLORS.border
+    s.Thickness = thickness or 1
+    s.Parent = parent
+    return s
+end
+
+local function addPadding(parent, t, b, l, r)
+    local p = Instance.new("UIPadding")
+    p.PaddingTop    = UDim.new(0, t or 8)
+    p.PaddingBottom = UDim.new(0, b or 8)
+    p.PaddingLeft   = UDim.new(0, l or 8)
+    p.PaddingRight  = UDim.new(0, r or 8)
+    p.Parent = parent
+    return p
+end
+
+local function tweenColor(obj, prop, color, duration)
+    TweenService:Create(obj, TweenInfo.new(duration or 0.2), {[prop] = color}):Play()
+end
+
+local function tweenSize(obj, size, duration)
+    TweenService:Create(obj, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Back), {Size = size}):Play()
+end
+
+-- ═══ MAIN FRAME ═══
+local MainFrame = create("Frame", {
+    Name = "MainFrame",
+    Size = UDim2.new(0, 340, 0, 580),
+    Position = UDim2.new(0.5, -170, 0.5, -290),
+    BackgroundColor3 = COLORS.bg,
+    BorderSizePixel = 0,
+    Parent = ScreenGui,
+})
+addCorner(MainFrame, 12)
+addStroke(MainFrame, COLORS.accent, 2)
+
+-- Shadow
+local Shadow = create("ImageLabel", {
+    Name = "Shadow",
+    Size = UDim2.new(1, 30, 1, 30),
+    Position = UDim2.new(0, -15, 0, -15),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://6015897843",
+    ImageColor3 = COLORS.black,
+    ImageTransparency = 0.4,
+    ScaleType = Enum.ScaleType.Slice,
+    SliceCenter = Rect.new(49, 49, 450, 450),
+    ZIndex = 0,
+    Parent = MainFrame,
+})
+
+-- ═══ TITLE BAR ═══
+local TitleBar = create("Frame", {
+    Name = "TitleBar",
+    Size = UDim2.new(1, 0, 0, 42),
+    BackgroundColor3 = COLORS.bgDark,
+    BorderSizePixel = 0,
+    Parent = MainFrame,
+})
+addCorner(TitleBar, 12)
+
+-- Fix bottom corners of title bar
+local TitleBarFix = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 14),
+    Position = UDim2.new(0, 0, 1, -14),
+    BackgroundColor3 = COLORS.bgDark,
+    BorderSizePixel = 0,
+    Parent = TitleBar,
+})
+
+local TitleIcon = create("TextLabel", {
+    Size = UDim2.new(0, 36, 1, 0),
+    Position = UDim2.new(0, 8, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "🥁",
+    TextSize = 20,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.white,
+    Parent = TitleBar,
+})
+
+local TitleText = create("TextLabel", {
+    Size = UDim2.new(1, -120, 1, 0),
+    Position = UDim2.new(0, 42, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "DRUM AUTO PLAYER",
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textPrimary,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = TitleBar,
+})
+
+-- Minimize Button
+local MinimizeBtn = create("TextButton", {
+    Name = "MinimizeBtn",
+    Size = UDim2.new(0, 32, 0, 32),
+    Position = UDim2.new(1, -72, 0, 5),
+    BackgroundColor3 = COLORS.panel,
+    Text = "—",
+    TextSize = 16,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textSecondary,
+    BorderSizePixel = 0,
+    Parent = TitleBar,
+})
+addCorner(MinimizeBtn, 6)
+
+-- Close Button
+local CloseBtn = create("TextButton", {
+    Name = "CloseBtn",
+    Size = UDim2.new(0, 32, 0, 32),
+    Position = UDim2.new(1, -38, 0, 5),
+    BackgroundColor3 = COLORS.accent,
+    Text = "✕",
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.white,
+    BorderSizePixel = 0,
+    Parent = TitleBar,
+})
+addCorner(CloseBtn, 6)
+
+-- ═══ CONTENT AREA ═══
+local Content = create("ScrollingFrame", {
+    Name = "Content",
+    Size = UDim2.new(1, -16, 1, -52),
+    Position = UDim2.new(0, 8, 0, 46),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = COLORS.accent,
+    CanvasSize = UDim2.new(0, 0, 0, 780),
+    Parent = MainFrame,
+})
+
+local ContentLayout = Instance.new("UIListLayout")
+ContentLayout.Padding = UDim.new(0, 8)
+ContentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ContentLayout.Parent = Content
+
+-- ═══ STATUS PANEL ═══
+local StatusPanel = create("Frame", {
+    Name = "StatusPanel",
+    Size = UDim2.new(1, 0, 0, 75),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 1,
+    Parent = Content,
+})
+addCorner(StatusPanel, 10)
+addStroke(StatusPanel, COLORS.border)
+addPadding(StatusPanel, 10, 10, 12, 12)
+
+local StatusTitle = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 16),
+    BackgroundTransparency = 1,
+    Text = "STATUS",
+    TextSize = 11,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = StatusPanel,
+})
+
+local StatusDot = create("Frame", {
+    Name = "StatusDot",
+    Size = UDim2.new(0, 10, 0, 10),
+    Position = UDim2.new(0, 0, 0, 24),
+    BackgroundColor3 = COLORS.accent,
+    BorderSizePixel = 0,
+    Parent = StatusPanel,
+})
+addCorner(StatusDot, 5)
+
+local StatusLabel = create("TextLabel", {
+    Name = "StatusLabel",
+    Size = UDim2.new(1, -18, 0, 18),
+    Position = UDim2.new(0, 18, 0, 20),
+    BackgroundTransparency = 1,
+    Text = "⏸ Stopped",
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textPrimary,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = StatusPanel,
+})
+
+local StatusInfo = create("TextLabel", {
+    Name = "StatusInfo",
+    Size = UDim2.new(1, 0, 0, 14),
+    Position = UDim2.new(0, 0, 0, 42),
+    BackgroundTransparency = 1,
+    Text = "Tekan tombol di bawah untuk mulai",
+    TextSize = 11,
+    Font = Enum.Font.Gotham,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = StatusPanel,
+})
+
+-- ═══ BEAT VISUALIZER ═══
+local BeatPanel = create("Frame", {
+    Name = "BeatPanel",
+    Size = UDim2.new(1, 0, 0, 50),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 2,
+    Parent = Content,
+})
+addCorner(BeatPanel, 10)
+addStroke(BeatPanel, COLORS.border)
+addPadding(BeatPanel, 6, 6, 12, 12)
+
+local BeatTitle = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 14),
+    BackgroundTransparency = 1,
+    Text = "BEAT VISUALIZER",
+    TextSize = 10,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = BeatPanel,
+})
+
+-- Beat dots container
+local BeatDotsFrame = create("Frame", {
+    Name = "BeatDots",
+    Size = UDim2.new(1, 0, 0, 18),
+    Position = UDim2.new(0, 0, 0, 18),
+    BackgroundTransparency = 1,
+    Parent = BeatPanel,
+})
+
+local BeatDotsLayout = Instance.new("UIListLayout")
+BeatDotsLayout.FillDirection = Enum.FillDirection.Horizontal
+BeatDotsLayout.Padding = UDim.new(0, 4)
+BeatDotsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+BeatDotsLayout.Parent = BeatDotsFrame
+
+local beatDots = {}
+for i = 1, 16 do
+    local dot = create("Frame", {
+        Name = "Dot" .. i,
+        Size = UDim2.new(0, 14, 0, 14),
+        BackgroundColor3 = COLORS.bgDark,
+        BorderSizePixel = 0,
+        Parent = BeatDotsFrame,
+    })
+    addCorner(dot, 3)
+    beatDots[i] = dot
+end
+
+-- ═══ BPM CONTROL ═══
+local BPMPanel = create("Frame", {
+    Name = "BPMPanel",
+    Size = UDim2.new(1, 0, 0, 65),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 3,
+    Parent = Content,
+})
+addCorner(BPMPanel, 10)
+addStroke(BPMPanel, COLORS.border)
+addPadding(BPMPanel, 8, 8, 12, 12)
+
+local BPMTitle = create("TextLabel", {
+    Size = UDim2.new(0.5, 0, 0, 14),
+    BackgroundTransparency = 1,
+    Text = "BPM",
+    TextSize = 11,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = BPMPanel,
+})
+
+local BPMDisplay = create("TextLabel", {
+    Name = "BPMDisplay",
+    Size = UDim2.new(1, 0, 0, 24),
+    Position = UDim2.new(0, 0, 0, 16),
+    BackgroundTransparency = 1,
+    Text = tostring(CONFIG.patternBPM),
+    TextSize = 22,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.accent,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    Parent = BPMPanel,
+})
+
+local BPMBtnDown = create("TextButton", {
+    Name = "BPMDown",
+    Size = UDim2.new(0, 40, 0, 28),
+    Position = UDim2.new(0, 0, 0, 16),
+    BackgroundColor3 = COLORS.bgDark,
+    Text = "- 5",
+    TextSize = 12,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textSecondary,
+    BorderSizePixel = 0,
+    Parent = BPMPanel,
+})
+addCorner(BPMBtnDown, 6)
+
+local BPMBtnUp = create("TextButton", {
+    Name = "BPMUp",
+    Size = UDim2.new(0, 40, 0, 28),
+    Position = UDim2.new(1, -40, 0, 16),
+    BackgroundColor3 = COLORS.bgDark,
+    Text = "+ 5",
+    TextSize = 12,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textSecondary,
+    BorderSizePixel = 0,
+    Parent = BPMPanel,
+})
+addCorner(BPMBtnUp, 6)
+
+-- ═══ SECTION: PATTERN LOOP ═══
+local PatternSection = create("Frame", {
+    Name = "PatternSection",
+    Size = UDim2.new(1, 0, 0, 230),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 4,
+    Parent = Content,
+})
+addCorner(PatternSection, 10)
+addStroke(PatternSection, COLORS.border)
+addPadding(PatternSection, 10, 10, 12, 12)
+
+local PatternSectionTitle = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 16),
+    BackgroundTransparency = 1,
+    Text = "🔁 PATTERN LOOP",
+    TextSize = 12,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textPrimary,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = PatternSection,
+})
+
+-- Pattern Buttons Container
+local PatternBtnsFrame = create("Frame", {
+    Name = "PatternBtns",
+    Size = UDim2.new(1, 0, 0, 140),
+    Position = UDim2.new(0, 0, 0, 22),
+    BackgroundTransparency = 1,
+    Parent = PatternSection,
+})
+
+local PatternBtnsLayout = Instance.new("UIGridLayout")
+PatternBtnsLayout.CellSize = UDim2.new(0.48, 0, 0, 30)
+PatternBtnsLayout.CellPadding = UDim2.new(0.04, 0, 0, 5)
+PatternBtnsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+PatternBtnsLayout.Parent = PatternBtnsFrame
+
+local patternButtons = {}
+for i, pat in ipairs(PATTERNS) do
+    local btn = create("TextButton", {
+        Name = "Pat" .. i,
+        BackgroundColor3 = (i == STATE.patternIndex) and COLORS.accent or COLORS.bgDark,
+        Text = pat.icon .. " " .. pat.name,
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        TextColor3 = (i == STATE.patternIndex) and COLORS.white or COLORS.textSecondary,
+        BorderSizePixel = 0,
+        LayoutOrder = i,
+        Parent = PatternBtnsFrame,
+    })
+    addCorner(btn, 6)
+    patternButtons[i] = btn
+end
+
+-- Pattern Play Button
+local PatternPlayBtn = create("TextButton", {
+    Name = "PatternPlayBtn",
+    Size = UDim2.new(1, 0, 0, 38),
+    Position = UDim2.new(0, 0, 1, -42),
+    BackgroundColor3 = COLORS.green,
+    Text = "▶  PLAY PATTERN",
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.white,
+    BorderSizePixel = 0,
+    Parent = PatternSection,
+})
+addCorner(PatternPlayBtn, 8)
+
+-- ═══ SECTION: EYELESS SONG ═══
+local EyelessSection = create("Frame", {
+    Name = "EyelessSection",
+    Size = UDim2.new(1, 0, 0, 140),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 5,
+    Parent = Content,
+})
+addCorner(EyelessSection, 10)
+addStroke(EyelessSection, COLORS.accent, 1)
+addPadding(EyelessSection, 10, 10, 12, 12)
+
+local EyelessTitle = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 16),
+    BackgroundTransparency = 1,
+    Text = "🎵 SLIPKNOT — EYELESS",
+    TextSize = 12,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.accent,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = EyelessSection,
+})
+
+local EyelessInfo = create("TextLabel", {
+    Name = "EyelessInfo",
+    Size = UDim2.new(1, 0, 0, 14),
+    Position = UDim2.new(0, 0, 0, 20),
+    BackgroundTransparency = 1,
+    Text = "142 BPM • " .. totalEyelessBars .. " bars • Full song with loop",
+    TextSize = 10,
+    Font = Enum.Font.Gotham,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = EyelessSection,
+})
+
+local EyelessSectionLabel = create("TextLabel", {
+    Name = "EyelessSectionLabel",
+    Size = UDim2.new(1, 0, 0, 18),
+    Position = UDim2.new(0, 0, 0, 38),
+    BackgroundTransparency = 1,
+    Text = "",
+    TextSize = 13,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.yellow,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = EyelessSection,
+})
+
+-- Progress bar
+local ProgressBg = create("Frame", {
+    Name = "ProgressBg",
+    Size = UDim2.new(1, 0, 0, 6),
+    Position = UDim2.new(0, 0, 0, 62),
+    BackgroundColor3 = COLORS.bgDark,
+    BorderSizePixel = 0,
+    Parent = EyelessSection,
+})
+addCorner(ProgressBg, 3)
+
+local ProgressFill = create("Frame", {
+    Name = "ProgressFill",
+    Size = UDim2.new(0, 0, 1, 0),
+    BackgroundColor3 = COLORS.accent,
+    BorderSizePixel = 0,
+    Parent = ProgressBg,
+})
+addCorner(ProgressFill, 3)
+
+local ProgressLabel = create("TextLabel", {
+    Name = "ProgressLabel",
+    Size = UDim2.new(1, 0, 0, 14),
+    Position = UDim2.new(0, 0, 0, 72),
+    BackgroundTransparency = 1,
+    Text = "",
+    TextSize = 10,
+    Font = Enum.Font.Gotham,
+    TextColor3 = COLORS.textDim,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = EyelessSection,
+})
+
+-- Eyeless Play Button
+local EyelessPlayBtn = create("TextButton", {
+    Name = "EyelessPlayBtn",
+    Size = UDim2.new(1, 0, 0, 38),
+    Position = UDim2.new(0, 0, 1, -42),
+    BackgroundColor3 = COLORS.accent,
+    Text = "▶  PLAY EYELESS",
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.white,
+    BorderSizePixel = 0,
+    Parent = EyelessSection,
+})
+addCorner(EyelessPlayBtn, 8)
+
+-- ═══ SECTION: KEY MAPPING ═══
+local KeySection = create("Frame", {
+    Name = "KeySection",
+    Size = UDim2.new(1, 0, 0, 170),
+    BackgroundColor3 = COLORS.panel,
+    BorderSizePixel = 0,
+    LayoutOrder = 6,
+    Parent = Content,
+})
+addCorner(KeySection, 10)
+addStroke(KeySection, COLORS.border)
+addPadding(KeySection, 10, 10, 12, 12)
+
+local KeyTitle = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 16),
+    BackgroundTransparency = 1,
+    Text = "⌨ KEY MAPPING",
+    TextSize = 12,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = COLORS.textPrimary,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = KeySection,
+})
+
+local keyMappingText = {
+    "Z → Kick        J → Tom 1",
+    "X → Snare       K → Tom 2",
+    "C → Hi-hat      L → Floor Tom",
+    "V → HH Open     ; → Crash",
+    "B → Ride",
+    "",
+    "⚠ Sesuaikan di tabel KEYS jika",
+    "  kontrol game berbeda!",
+}
+
+local KeyInfoFrame = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 130),
+    Position = UDim2.new(0, 0, 0, 22),
+    BackgroundTransparency = 1,
+    Parent = KeySection,
+})
+
+local KeyInfoLayout = Instance.new("UIListLayout")
+KeyInfoLayout.Padding = UDim.new(0, 2)
+KeyInfoLayout.Parent = KeyInfoFrame
+
+for lineIdx, line in ipairs(keyMappingText) do
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 14),
+        BackgroundTransparency = 1,
+        Text = line,
+        TextSize = 10,
+        Font = Enum.Font.Code,
+        TextColor3 = (lineIdx >= 7) and COLORS.yellow or COLORS.textSecondary,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = lineIdx,
+        Parent = KeyInfoFrame,
+    })
+end
+
+------------------------------------------------------------
+--
+--        █▀▀ █░█ █   █░░ █▀█ █▀▀ █ █▀▀
+--        █▄█ █▄█ █   █▄▄ █▄█ █▄█ █ █▄▄
+--
+------------------------------------------------------------
+
+-- ═══ GUI STATE MANAGEMENT ═══
+local isMinimized = false
+local originalSize = MainFrame.Size
+
+-- Dragging
+local dragging = false
+local dragStart, startPos
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+       input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+       input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+       input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Minimize
+MinimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        Content.Visible = false
+        tweenSize(MainFrame, UDim2.new(0, 340, 0, 42), 0.2)
+        MinimizeBtn.Text = "+"
+    else
+        tweenSize(MainFrame, originalSize, 0.2)
+        task.wait(0.2)
+        Content.Visible = true
+        MinimizeBtn.Text = "—"
+    end
+end)
+
+-- Close
+CloseBtn.MouseButton1Click:Connect(function()
+    STATE.isPlaying = false
+    task.wait(0.15)
+    ScreenGui:Destroy()
+end)
+
+-- Hover Effects
+local function addHoverEffect(btn, normalColor, hoverColor)
+    btn.MouseEnter:Connect(function()
+        tweenColor(btn, "BackgroundColor3", hoverColor, 0.15)
+    end)
+    btn.MouseLeave:Connect(function()
+        tweenColor(btn, "BackgroundColor3", normalColor, 0.15)
+    end)
+end
+
+addHoverEffect(MinimizeBtn, COLORS.panel, COLORS.panelHover)
+addHoverEffect(CloseBtn, COLORS.accent, COLORS.accentGlow)
+
+------------------------------------------------------------
+-- UPDATE GUI FUNCTION
+------------------------------------------------------------
+local function updateGUI()
+    -- BPM Display
+    local currentBPM = (STATE.mode == "eyeless" and STATE.isPlaying)
+        and CONFIG.eyelessBPM or CONFIG.patternBPM
+    BPMDisplay.Text = tostring(currentBPM)
+
+    -- Status
+    if STATE.isPlaying then
+        StatusDot.BackgroundColor3 = COLORS.green
+        if STATE.mode == "pattern" then
+            local pat = PATTERNS[STATE.patternIndex]
+            StatusLabel.Text = "▶ Playing: " .. pat.icon .. " " .. pat.name
+            StatusInfo.Text = "Pattern Loop • " .. CONFIG.patternBPM .. " BPM"
+            PatternPlayBtn.Text = "⏹  STOP PATTERN"
+            PatternPlayBtn.BackgroundColor3 = COLORS.accent
+            EyelessPlayBtn.Text = "▶  PLAY EYELESS"
+            EyelessPlayBtn.BackgroundColor3 = COLORS.accent
+            EyelessSectionLabel.Text = ""
+            ProgressLabel.Text = ""
+            ProgressFill.Size = UDim2.new(0, 0, 1, 0)
+        else
+            StatusLabel.Text = "▶ EYELESS"
+            StatusInfo.Text = STATE.currentSection .. " • " .. CONFIG.eyelessBPM .. " BPM"
+            EyelessPlayBtn.Text = "⏹  STOP EYELESS"
+            EyelessPlayBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+            PatternPlayBtn.Text = "▶  PLAY PATTERN"
+            PatternPlayBtn.BackgroundColor3 = COLORS.green
+            EyelessSectionLabel.Text = STATE.currentSection
+
+            -- Progress
+            if STATE.totalBars > 0 then
+                local progress = STATE.barCount / STATE.totalBars
+                ProgressFill.Size = UDim2.new(math.clamp(progress, 0, 1), 0, 1, 0)
+                ProgressLabel.Text = string.format(
+                    "Bar %d / %d (%.0f%%)",
+                    STATE.barCount, STATE.totalBars,
+                    progress * 100
+                )
+            end
+        end
+    else
+        StatusDot.BackgroundColor3 = COLORS.accent
+        StatusLabel.Text = "⏸ Stopped"
+        StatusInfo.Text = "Tekan tombol di bawah untuk mulai"
+        PatternPlayBtn.Text = "▶  PLAY PATTERN"
+        PatternPlayBtn.BackgroundColor3 = COLORS.green
+        EyelessPlayBtn.Text = "▶  PLAY EYELESS"
+        EyelessPlayBtn.BackgroundColor3 = COLORS.accent
+        EyelessSectionLabel.Text = ""
+        ProgressLabel.Text = ""
+        ProgressFill.Size = UDim2.new(0, 0, 1, 0)
+
+        -- Reset beat dots
+        for _, dot in ipairs(beatDots) do
+            dot.BackgroundColor3 = COLORS.bgDark
+        end
+    end
+
+    -- Pattern buttons highlight
+    for i, btn in ipairs(patternButtons) do
+        if i == STATE.patternIndex then
+            btn.BackgroundColor3 = COLORS.accent
+            btn.TextColor3 = COLORS.white
+        else
+            btn.BackgroundColor3 = COLORS.bgDark
+            btn.TextColor3 = COLORS.textSecondary
+        end
+    end
+
+    -- Eyeless info
+    EyelessInfo.Text = CONFIG.eyelessBPM .. " BPM • "
+        .. totalEyelessBars .. " bars • Full song with loop"
+end
+
+-- Beat dot animation
+local function lightBeatDot(stepIndex, maxSteps)
+    local dotIndex = ((stepIndex - 1) % 16) + 1
+    for i, dot in ipairs(beatDots) do
+        if i == dotIndex then
+            dot.BackgroundColor3 = COLORS.accent
+            -- Tween fade
+            task.spawn(function()
+                task.wait(0.15)
+                if beatDots[i] then
+                    tweenColor(dot, "BackgroundColor3", COLORS.bgDark, 0.3)
+                end
+            end)
+        end
+    end
+end
+
+------------------------------------------------------------
+-- PLAY FUNCTIONS
+------------------------------------------------------------
+local function stopPlaying()
+    STATE.isPlaying = false
+    task.wait(0.2)
+    updateGUI()
+end
+
+-- Pattern Loop
+local function playPatternLoop()
+    while STATE.isPlaying and STATE.mode == "pattern" do
+        local eighthNote = 60 / CONFIG.patternBPM / 2
+        local pattern = PATTERNS[STATE.patternIndex]
+
+        for i = 1, #pattern.steps do
+            if not STATE.isPlaying or STATE.mode ~= "pattern" then return end
+
+            STATE.currentStep = i
+            hitDrums(pattern.steps[i])
+            lightBeatDot(i, #pattern.steps)
+
+            task.wait(math.max(eighthNote + humanize(), 0.05))
+        end
+    end
+end
+
+-- Eyeless Song
+local function playEyeless()
+    STATE.totalBars = totalEyelessBars
+    STATE.barCount = 0
+
+    while STATE.isPlaying and STATE.mode == "eyeless" do
+        STATE.barCount = 0
+
+        for structIdx, entry in ipairs(EYELESS_STRUCTURE) do
+            if not STATE.isPlaying or STATE.mode ~= "eyeless" then return end
+
+            local sectionKey = entry[1]
+            local bars       = entry[2]
+            local section    = EYELESS_SECTIONS[sectionKey]
+
+            if not section then continue end
+
+            STATE.currentSection = section.icon .. " " .. section.name
+            updateGUI()
+
+            for bar = 1, bars do
+                if not STATE.isPlaying or STATE.mode ~= "eyeless" then return end
+                STATE.barCount = STATE.barCount + 1
+
+                for step = 1, #section.steps do
+                    if not STATE.isPlaying or STATE.mode ~= "eyeless" then return end
+
+                    local sixteenthNote = 60 / CONFIG.eyelessBPM / 4
+                    STATE.currentStep = step
+
+                    hitDrums(section.steps[step])
+                    lightBeatDot(step, #section.steps)
+
+                    -- Update progress setiap 4 steps
+                    if step % 4 == 0 then
+                        updateGUI()
+                    end
+
+                    task.wait(math.max(sixteenthNote + humanize(), 0.04))
+                end
+            end
+        end
+
+        -- Song selesai → loop
+        print("🔄 EYELESS selesai — loop dari awal...")
+    end
+end
+
+------------------------------------------------------------
+-- BUTTON EVENTS
+------------------------------------------------------------
+
+-- Pattern Buttons
+for i, btn in ipairs(patternButtons) do
+    btn.MouseButton1Click:Connect(function()
+        STATE.patternIndex = i
+        updateGUI()
+    end)
+end
+
+-- Pattern Play
+PatternPlayBtn.MouseButton1Click:Connect(function()
+    if STATE.isPlaying then
+        if STATE.mode == "pattern" then
+            stopPlaying()
+            return
+        else
+            stopPlaying()
+        end
+    end
+    STATE.mode = "pattern"
+    STATE.isPlaying = true
+    updateGUI()
+    task.spawn(playPatternLoop)
+end)
+
+-- Eyeless Play
+EyelessPlayBtn.MouseButton1Click:Connect(function()
+    if STATE.isPlaying then
+        if STATE.mode == "eyeless" then
+            stopPlaying()
+            return
+        else
+            stopPlaying()
+        end
+    end
+    STATE.mode = "eyeless"
+    STATE.isPlaying = true
+    updateGUI()
+    task.spawn(playEyeless)
+end)
+
+-- BPM Controls
+BPMBtnUp.MouseButton1Click:Connect(function()
+    if STATE.isPlaying and STATE.mode == "eyeless" then
+        CONFIG.eyelessBPM = math.min(CONFIG.eyelessBPM + 5, 220)
+    else
+        CONFIG.patternBPM = math.min(CONFIG.patternBPM + 5, 300)
+    end
+    updateGUI()
+end)
+
+BPMBtnDown.MouseButton1Click:Connect(function()
+    if STATE.isPlaying and STATE.mode == "eyeless" then
+        CONFIG.eyelessBPM = math.max(CONFIG.eyelessBPM - 5, 60)
+    else
+        CONFIG.patternBPM = math.max(CONFIG.patternBPM - 5, 40)
+    end
+    updateGUI()
+end)
+
+-- Hover effects untuk semua tombol interaktif
+addHoverEffect(BPMBtnUp, COLORS.bgDark, COLORS.panelHover)
+addHoverEffect(BPMBtnDown, COLORS.bgDark, COLORS.panelHover)
+
+for i, btn in ipairs(patternButtons) do
+    btn.MouseEnter:Connect(function()
+        if i ~= STATE.patternIndex then
+            tweenColor(btn, "BackgroundColor3", COLORS.panelHover, 0.15)
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if i ~= STATE.patternIndex then
+            tweenColor(btn, "BackgroundColor3", COLORS.bgDark, 0.15)
+        end
+    end)
+end
+
+------------------------------------------------------------
+-- KEYBOARD SHORTCUTS (masih bisa pakai keyboard)
+------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    -- P = Toggle Pattern
+    if input.KeyCode == Enum.KeyCode.P then
+        if STATE.isPlaying and STATE.mode == "pattern" then
+            stopPlaying()
+        else
+            if STATE.isPlaying then stopPlaying() end
+            STATE.mode = "pattern"
+            STATE.isPlaying = true
+            updateGUI()
+            task.spawn(playPatternLoop)
+        end
+    end
+
+    -- O = Toggle Eyeless
+    if input.KeyCode == Enum.KeyCode.O then
+        if STATE.isPlaying and STATE.mode == "eyeless" then
+            stopPlaying()
+        else
+            if STATE.isPlaying then stopPlaying() end
+            STATE.mode = "eyeless"
+            STATE.isPlaying = true
+            updateGUI()
+            task.spawn(playEyeless)
+        end
+    end
+
+    -- [ = Next Pattern
+    if input.KeyCode == Enum.KeyCode.LeftBracket then
+        STATE.patternIndex = (STATE.patternIndex % #PATTERNS) + 1
+        updateGUI()
+    end
+
+    -- ] = BPM Up
+    if input.KeyCode == Enum.KeyCode.RightBracket then
+        if STATE.isPlaying and STATE.mode == "eyeless" then
+            CONFIG.eyelessBPM = math.min(CONFIG.eyelessBPM + 5, 220)
+        else
+            CONFIG.patternBPM = math.min(CONFIG.patternBPM + 5, 300)
+        end
+        updateGUI()
+    end
+
+    -- ' = BPM Down
+    if input.KeyCode == Enum.KeyCode.Quote then
+        if STATE.isPlaying and STATE.mode == "eyeless" then
+            CONFIG.eyelessBPM = math.max(CONFIG.eyelessBPM - 5, 60)
+        else
+            CONFIG.patternBPM = math.max(CONFIG.patternBPM - 5, 40)
+        end
+        updateGUI()
+    end
+end)
+
+------------------------------------------------------------
+-- SAFETY
+------------------------------------------------------------
+LocalPlayer.CharacterRemoving:Connect(function()
+    STATE.isPlaying = false
+    updateGUI()
+end)
+
+------------------------------------------------------------
+-- INITIAL GUI UPDATE
+------------------------------------------------------------
+updateGUI()
+
+print("══════════════════════════════════════")
+print("  🥁 DRUM AUTO PLAYER + GUI loaded!")
+print("  GUI tersedia di layar.")
+print("  Keyboard: P/O/[/]/\'")
+print("══════════════════════════════════════")
