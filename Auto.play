@@ -1,0 +1,640 @@
+--[[
+╔═══════════════════════════════════════════════════════╗
+║   VIRTUAL DRUMS AUTO PLAYER                          ║
+║   + SLIPKNOT — EYELESS (Full Song)                   ║
+║   Game: Virtual Drums (ID: 6831290123)               ║
+║                                                       ║
+║   P    →  Start / Stop pattern loop                   ║
+║   O    →  Start / Stop Eyeless song                   ║
+║   [    →  Ganti pattern (mode pattern loop)           ║
+║   ]    →  BPM + (5 eyeless / 10 pattern)              ║
+║   '    →  BPM - (5 eyeless / 10 pattern)              ║
+╚═══════════════════════════════════════════════════════╝
+]]
+
+------------------------------------------------------------
+-- SERVICES
+------------------------------------------------------------
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService    = game:GetService("UserInputService")
+
+------------------------------------------------------------
+-- KONFIGURASI UTAMA
+------------------------------------------------------------
+local BPM            = 120          -- BPM untuk pattern loop
+local HUMANIZE_MAX   = 0.020        -- random delay max (detik)
+local KEY_HOLD_TIME  = 0.025        -- durasi tombol ditahan
+
+-- Tombol kontrol
+local TOGGLE_KEY   = Enum.KeyCode.P              -- pattern loop
+local SONG_KEY     = Enum.KeyCode.O              -- eyeless song
+local SWITCH_KEY   = Enum.KeyCode.LeftBracket    -- [
+local BPM_UP_KEY   = Enum.KeyCode.RightBracket   -- ]
+local BPM_DOWN_KEY = Enum.KeyCode.Quote           -- '
+
+------------------------------------------------------------
+-- KEY MAPPING DRUM
+-- ┌──────────────────────────────────────────────┐
+-- │  SESUAIKAN DENGAN KONTROL IN-GAME!           │
+-- │  Settings game → lihat keybind → ubah sini   │
+-- └──────────────────────────────────────────────┘
+------------------------------------------------------------
+local KEYS = {
+    kick      = Enum.KeyCode.Z,
+    snare     = Enum.KeyCode.X,
+    hihat     = Enum.KeyCode.C,
+    hihatOpen = Enum.KeyCode.V,
+    tom1      = Enum.KeyCode.J,
+    tom2      = Enum.KeyCode.K,
+    floorTom  = Enum.KeyCode.L,
+    crash     = Enum.KeyCode.Semicolon,
+    ride      = Enum.KeyCode.B,
+}
+
+------------------------------------------------------------
+-- STATE VARIABLES
+------------------------------------------------------------
+local isPlaying      = false
+local mode           = "pattern"   -- "pattern" | "eyeless"
+local patternIndex   = 1
+local currentSection = ""
+
+------------------------------------------------------------
+-- UTILITY FUNCTIONS
+------------------------------------------------------------
+local function sendKeyPress(keyCode, pressed)
+    local ok = pcall(function()
+        VirtualInputManager:SendKeyEvent(pressed, keyCode, false, game)
+    end)
+    if not ok then
+        pcall(function()
+            if pressed then keypress(keyCode) else keyrelease(keyCode) end
+        end)
+    end
+end
+
+local function hitDrums(drumNames)
+    if not drumNames or #drumNames == 0 then return end
+    for _, name in ipairs(drumNames) do
+        local kc = KEYS[name]
+        if kc then sendKeyPress(kc, true) end
+    end
+    task.wait(KEY_HOLD_TIME)
+    for _, name in ipairs(drumNames) do
+        local kc = KEYS[name]
+        if kc then sendKeyPress(kc, false) end
+    end
+end
+
+local function humanize()
+    return math.random() * HUMANIZE_MAX
+end
+
+local function stopPlaying()
+    isPlaying = false
+    task.wait(0.2)
+end
+
+------------------------------------------------------------
+--
+--   BAGIAN 1 :  PATTERN LOOP MODE
+--   (original 7 pattern, 8th-note resolution)
+--
+------------------------------------------------------------
+local PATTERNS = {
+    [1] = {
+        name = "Simple Rock",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+        }
+    },
+    [2] = {
+        name = "Driving Rock",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"kick","hihat"},  {"kick","hihat"},
+            {"snare","hihat"}, {"hihat"},
+        }
+    },
+    [3] = {
+        name = "Disco",
+        steps = {
+            {"kick","hihat"},            {"hihat"},
+            {"kick","snare","hihat"},    {"hihat"},
+            {"kick","hihat"},            {"hihat"},
+            {"kick","snare","hihat"},    {"hihat"},
+        }
+    },
+    [4] = {
+        name = "Half-Time",
+        steps = {
+            {"kick","hihat"},  {"hihat"},
+            {"hihat"},         {"hihat"},
+            {"snare","hihat"}, {"hihat"},
+            {"hihat"},         {"kick","hihat"},
+        }
+    },
+    [5] = {
+        name = "Ride Groove",
+        steps = {
+            {"kick","ride"},  {"hihat"},
+            {"snare","ride"}, {"hihat"},
+            {"kick","ride"},  {"kick","hihat"},
+            {"snare","ride"}, {"hihat"},
+        }
+    },
+    [6] = {
+        name = "Tom Fill",
+        steps = {
+            {"snare"},   {"snare"},
+            {"tom1"},    {"tom1"},
+            {"tom2"},    {"tom2"},
+            {"floorTom"},{"floorTom","crash"},
+        }
+    },
+    [7] = {
+        name = "Blast Beat",
+        steps = {
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+            {"kick","hihat"},  {"snare","hihat"},
+        }
+    },
+}
+
+local function playPatternLoop()
+    while isPlaying and mode == "pattern" do
+        local eighthNote = 60 / BPM / 2
+        local pattern = PATTERNS[patternIndex]
+        for i = 1, #pattern.steps do
+            if not isPlaying or mode ~= "pattern" then return end
+            hitDrums(pattern.steps[i])
+            task.wait(math.max(eighthNote + humanize(), 0.05))
+        end
+    end
+end
+
+------------------------------------------------------------
+--
+--   BAGIAN 2 :  SLIPKNOT — EYELESS  (Full Song)
+--
+--   Tempo : 142 BPM
+--   Resolusi : 16th note (16 step = 1 bar)
+--   Referensi grid per bar :
+--
+--     Step :  1  e  &  a │ 2  e  &  a │ 3  e  &  a │ 4  e  &  a
+--     Index:  1  2  3  4 │ 5  6  7  8 │ 9 10 11 12 │13 14 15 16
+--
+------------------------------------------------------------
+local EYELESS = {
+    bpm = 142,
+}
+
+-- ══════════════════════════════════════════
+--  SECTION DEFINITIONS  (masing-masing 1 bar = 16 steps)
+-- ══════════════════════════════════════════
+
+EYELESS.sections = {}
+
+-- ── INTRO 1 : Hi-hat quarter notes (sparse) ──────────
+--  HH: x . . . x . . . x . . . x . . .
+EYELESS.sections.intro1 = {
+    name = "🎬 Intro",
+    steps = {
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+        {"hihat"}, {}, {}, {},
+    }
+}
+
+-- ── INTRO 2 : Kick + 8th-note hi-hat (building) ─────
+--  HH: x . x . x . x . x . x . x . x .
+--  KK: x . . . . . . . x . . . . . . .
+EYELESS.sections.intro2 = {
+    name = "🔨 Intro Build",
+    steps = {
+        {"kick","hihat"}, {}, {"hihat"}, {},
+        {"hihat"},        {}, {"hihat"}, {},
+        {"kick","hihat"}, {}, {"hihat"}, {},
+        {"hihat"},        {}, {"hihat"}, {},
+    }
+}
+
+-- ── INTRO 3 : Snare build → crash (ke verse) ────────
+--  HH: x . x . x . x . . . . . . . . .
+--  KK: x . x x . . x x . . . . . . . .
+--  SN: . . . . . . . . x . x . x x x x
+--  CR: . . . . . . . . . . . . . . . x
+EYELESS.sections.introCrash = {
+    name = "💥 Intro Crash",
+    steps = {
+        {"kick","hihat"}, {},             {"kick","hihat"}, {"kick"},
+        {"hihat"},        {},             {"kick","hihat"}, {"kick"},
+        {"snare"},        {},             {"snare"},        {},
+        {"snare"},        {"snare"},      {"snare"},        {"snare","crash"},
+    }
+}
+
+-- ── VERSE : Joey's iconic galloping groove ───────────
+--  HH: x . x . x . x . x . x . x . x .
+--  SN: . . . . x . . . . . . . x . . .
+--  KK: x . x x . . x . x . x x . . x .
+--
+--  ► Double-kick gallop pada "a" sebelum beat
+EYELESS.sections.verse = {
+    name = "🎸 Verse",
+    steps = {
+        {"kick","hihat"},  {},             {"kick","hihat"}, {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"}, {},
+        {"kick","hihat"},  {},             {"kick","hihat"}, {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"}, {},
+    }
+}
+
+-- ── VERSE 2 : Lebih berat, lebih banyak double-kick ──
+--  HH: x . x . x . x . x x x . x . . .
+--  SN: . . . . x . . . . . . . x . . .
+--  KK: x . x x . . x x x x x x . . x x
+EYELESS.sections.verse2 = {
+    name = "🎸 Verse (Heavy)",
+    steps = {
+        {"kick","hihat"},  {},             {"kick","hihat"},  {"kick"},
+        {"snare","hihat"}, {},             {"kick","hihat"},  {"kick"},
+        {"kick","hihat"},  {"kick"},       {"kick","hihat"},  {"kick"},
+        {"snare","hihat"}, {},             {"kick"},          {"kick"},
+    }
+}
+
+-- ── PRE-CHORUS : Intensitas naik, ride cymbal ────────
+--  RD: x . x . x . x . x . x . x . . .
+--  SN: . . . . x . . . . . . . x . . .
+--  KK: x x . x . x . x x x . x . x x x
+EYELESS.sections.prechorus = {
+    name = "⚡ Pre-Chorus",
+    steps = {
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"kick"},          {"kick"},
+    }
+}
+
+-- ── CHORUS : Full power, crash + ride + double bass ──
+--  CR: x . . . . . . . . . . . . . . .
+--  RD: . . x . x . x . x . x . x . x .
+--  SN: . . . . x . . . . . . . x . . .
+--  KK: x x . x . x . x x x . x . x . x
+--
+--  ► Non-stop double-kick, crash di beat 1
+EYELESS.sections.chorus = {
+    name = "🔥 Chorus",
+    steps = {
+        {"kick","crash"},  {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+    }
+}
+
+-- ── CHORUS END : Variasi akhir chorus ────────────────
+--  RD: x . x . x . x . x . x . x . . .
+--  SN: . . . . x . . . . . . . x . . .
+--  KK: x x . x . x . x x x . x . x x x
+--  CR: . . . . . . . . . . . . . . . x
+EYELESS.sections.chorus2 = {
+    name = "🔥 Chorus (End)",
+    steps = {
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"kick"},          {"kick","crash"},
+    }
+}
+
+-- ── BRIDGE / BREAKDOWN : Berat, spacious ─────────────
+--  CR: x . . . . . x . . . . . . . x .
+--  SN: . . . . . . x . . . . . . . x .
+--  KK: x . . x . . . . x . . x . x . .
+--
+--  ► Feel setengah tempo, power hits
+EYELESS.sections.bridge = {
+    name = "💀 Breakdown",
+    steps = {
+        {"kick","crash"},  {},             {},                {"kick"},
+        {},                {},             {"snare","crash"},  {},
+        {"kick"},          {},             {},                {"kick"},
+        {},                {"kick"},       {"snare","crash"},  {},
+    }
+}
+
+-- ── BRIDGE 2 : Breakdown variation (lebih padat) ─────
+--  CR: x . . . . . x . x . . . . . x .
+--  SN: . . . . . . x . . . x . . . x .
+--  KK: x . x . x . . . x . . . x x . .
+EYELESS.sections.bridge2 = {
+    name = "💀 Breakdown (Heavy)",
+    steps = {
+        {"kick","crash"},  {},             {"kick"},          {},
+        {"kick"},          {},             {"snare","crash"},  {},
+        {"kick","crash"},  {},             {"snare"},         {},
+        {"kick"},          {"kick"},       {"snare","crash"},  {},
+    }
+}
+
+-- ── FILL : Tom fill klasik Joey Jordison ─────────────
+--  SN: x . x . . . . . . . . . . . . .
+--  T1: . . . . x . x . . . . . . . . .
+--  T2: . . . . . . . . x . x . . . . .
+--  FT: . . . . . . . . . . . . x . x .
+--  CR: . . . . . . . . . . . . . . . x
+EYELESS.sections.fill = {
+    name = "🥁 Fill",
+    steps = {
+        {"snare"},    {},          {"snare"},    {},
+        {"tom1"},     {},          {"tom1"},     {},
+        {"tom2"},     {},          {"tom2"},     {},
+        {"floorTom"}, {},          {"floorTom"}, {"crash"},
+    }
+}
+
+-- ── FILL 2 : Aggressive snare roll + toms ────────────
+--  SN: x x x x . . . . . . . . . . . .
+--  T1: . . . . x x . . . . . . . . . .
+--  T2: . . . . . . x x . . . . . . . .
+--  FT: . . . . . . . . x x . . . . . .
+--  KK: . . . . . . . . . . x x x x x .
+--  CR: . . . . . . . . . . . . . . . x
+EYELESS.sections.fill2 = {
+    name = "🥁 Fill (Aggressive)",
+    steps = {
+        {"snare"},    {"snare"},   {"snare"},    {"snare"},
+        {"tom1"},     {"tom1"},    {"tom2"},     {"tom2"},
+        {"floorTom"}, {"floorTom"},{"kick"},     {"kick"},
+        {"kick"},     {"kick"},    {"kick"},     {"crash"},
+    }
+}
+
+-- ── OUTRO : Ending pattern ───────────────────────────
+--  CR: x . . . . . . . . . . . . . . .
+--  RD: . . x . x . x . x . x . . . . .
+--  SN: . . . . x . . . . . . . x . x .
+--  KK: x x . x . x . x x x . . . . . .
+EYELESS.sections.outro = {
+    name = "🏁 Outro",
+    steps = {
+        {"kick","crash"},  {"kick"},       {"ride"},          {"kick"},
+        {"snare","ride"},  {"kick"},       {"ride"},          {"kick"},
+        {"kick","ride"},   {"kick"},       {"ride"},          {},
+        {"snare"},         {},             {"snare","crash"},  {},
+    }
+}
+
+-- ══════════════════════════════════════════
+--  SONG STRUCTURE (urutan & pengulangan)
+-- ══════════════════════════════════════════
+--  Format: { "sectionKey", jumlahBar }
+--  Total  : ~68 bars ≈ 1 menit 55 detik @ 142 BPM
+--  Lagu akan auto-loop ke awal setelah outro
+
+EYELESS.structure = {
+    -----------------------------------------
+    -- INTRO  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "intro1",     3 },     -- 3 bar hi-hat sparse
+    { "intro2",     4 },     -- 4 bar kick building
+    { "introCrash", 1 },     -- 1 bar snare roll → crash
+
+    -----------------------------------------
+    -- VERSE 1  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "verse",      6 },     -- 6 bar main groove
+    { "verse2",     1 },     -- 1 bar heavy variation
+    { "fill",       1 },     -- 1 bar tom fill
+
+    -----------------------------------------
+    -- CHORUS 1  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "chorus",     6 },     -- 6 bar full power
+    { "chorus2",    1 },     -- 1 bar chorus ending
+    { "fill2",      1 },     -- 1 bar aggressive fill
+
+    -----------------------------------------
+    -- VERSE 2  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "verse",      5 },     -- 5 bar groove
+    { "verse2",     1 },     -- 1 bar heavy
+    { "prechorus",  2 },     -- 2 bar pre-chorus build
+
+    -----------------------------------------
+    -- CHORUS 2  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "fill",       1 },     -- 1 bar fill into chorus
+    { "chorus",     5 },     -- 5 bar chorus
+    { "chorus2",    2 },     -- 2 bar chorus ending
+
+    -----------------------------------------
+    -- BRIDGE / BREAKDOWN  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "bridge",     4 },     -- 4 bar breakdown
+    { "bridge2",    3 },     -- 3 bar heavy breakdown
+    { "fill2",      1 },     -- 1 bar fill out
+
+    -----------------------------------------
+    -- FINAL CHORUS  (8 bars, ~13 detik)
+    -----------------------------------------
+    { "chorus",     5 },     -- 5 bar final chorus
+    { "chorus2",    2 },     -- 2 bar chorus ending
+    { "fill",       1 },     -- 1 bar fill
+
+    -----------------------------------------
+    -- OUTRO  (4 bars, ~7 detik)
+    -----------------------------------------
+    { "outro",      4 },     -- 4 bar outro → loop
+}
+
+-- ══════════════════════════════════════════
+--  PLAY EYELESS FUNCTION
+-- ══════════════════════════════════════════
+local function playEyeless()
+    print("\n🎵 ═══ SLIPKNOT — EYELESS ═══")
+    print("   Tempo: " .. EYELESS.bpm .. " BPM")
+    print("   Tekan O untuk stop\n")
+
+    while isPlaying and mode == "eyeless" do
+        currentSection = ""
+
+        for structIdx, entry in ipairs(EYELESS.structure) do
+            if not isPlaying or mode ~= "eyeless" then return end
+
+            local sectionKey = entry[1]
+            local bars       = entry[2]
+            local section    = EYELESS.sections[sectionKey]
+
+            if not section then
+                warn("Section tidak ditemukan: " .. sectionKey)
+                continue
+            end
+
+            -- Print pergantian section
+            if currentSection ~= section.name then
+                currentSection = section.name
+                print(string.format(
+                    "  ♪  %s  (%d bar%s)  [%d/%d]",
+                    section.name,
+                    bars,
+                    bars > 1 and "s" or "",
+                    structIdx,
+                    #EYELESS.structure
+                ))
+            end
+
+            -- Mainkan section sebanyak 'bars' kali
+            for bar = 1, bars do
+                if not isPlaying or mode ~= "eyeless" then return end
+
+                for step = 1, #section.steps do
+                    if not isPlaying or mode ~= "eyeless" then return end
+
+                    -- Hitung timing per step (recalc supaya BPM change real-time)
+                    local sixteenthNote = 60 / EYELESS.bpm / 4
+
+                    hitDrums(section.steps[step])
+                    task.wait(math.max(sixteenthNote + humanize(), 0.04))
+                end
+            end
+        end
+
+        -- Lagu selesai → loop
+        print("\n  🔄 EYELESS selesai — loop dari awal...\n")
+    end
+end
+
+------------------------------------------------------------
+--
+--   INPUT HANDLER
+--
+------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    -- ═══ P : Toggle Pattern Loop ═══
+    if input.KeyCode == TOGGLE_KEY then
+        if isPlaying then
+            local wasMode = mode
+            stopPlaying()
+            if wasMode == "pattern" then
+                print("🥁 Pattern Loop: OFF")
+                return
+            end
+        end
+        mode = "pattern"
+        isPlaying = true
+        local pat = PATTERNS[patternIndex]
+        print(string.format(
+            "🥁 Pattern Loop: ON  |  %s  |  BPM: %d",
+            pat.name, BPM
+        ))
+        task.spawn(playPatternLoop)
+        return
+    end
+
+    -- ═══ O : Toggle Eyeless Song ═══
+    if input.KeyCode == SONG_KEY then
+        if isPlaying then
+            local wasMode = mode
+            stopPlaying()
+            if wasMode == "eyeless" then
+                currentSection = ""
+                print("🎵 EYELESS: OFF")
+                return
+            end
+        end
+        mode = "eyeless"
+        isPlaying = true
+        currentSection = ""
+        task.spawn(playEyeless)
+        return
+    end
+
+    -- ═══ [ : Ganti Pattern ═══
+    if input.KeyCode == SWITCH_KEY then
+        patternIndex = (patternIndex % #PATTERNS) + 1
+        local pat = PATTERNS[patternIndex]
+        print(string.format("🔄 Pattern → %d. %s", patternIndex, pat.name))
+        return
+    end
+
+    -- ═══ ] : BPM Naik ═══
+    if input.KeyCode == BPM_UP_KEY then
+        if isPlaying and mode == "eyeless" then
+            EYELESS.bpm = math.min(EYELESS.bpm + 5, 220)
+            print("⏫ Eyeless BPM: " .. EYELESS.bpm)
+        else
+            BPM = math.min(BPM + 10, 300)
+            print("⏫ Pattern BPM: " .. BPM)
+        end
+        return
+    end
+
+    -- ═══ ' : BPM Turun ═══
+    if input.KeyCode == BPM_DOWN_KEY then
+        if isPlaying and mode == "eyeless" then
+            EYELESS.bpm = math.max(EYELESS.bpm - 5, 80)
+            print("⏬ Eyeless BPM: " .. EYELESS.bpm)
+        else
+            BPM = math.max(BPM - 10, 40)
+            print("⏬ Pattern BPM: " .. BPM)
+        end
+        return
+    end
+end)
+
+------------------------------------------------------------
+-- SAFETY : Lepas semua saat karakter hilang
+------------------------------------------------------------
+game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
+    isPlaying = false
+    currentSection = ""
+end)
+
+------------------------------------------------------------
+-- STARTUP MESSAGE
+------------------------------------------------------------
+print("\n")
+print("══════════════════════════════════════════════")
+print("  🥁  VIRTUAL DRUMS AUTO PLAYER")
+print("  🎵  + SLIPKNOT — EYELESS (142 BPM)")
+print("══════════════════════════════════════════════")
+print("  P  →  Start / Stop Pattern Loop")
+print("  O  →  Start / Stop EYELESS Song")
+print("  [  →  Ganti Pattern")
+print("  ]  →  BPM naik   (pattern +10 / eyeless +5)")
+print("  '  →  BPM turun  (pattern -10 / eyeless -5)")
+print("──────────────────────────────────────────────")
+print("  📋 Pattern Loop (" .. BPM .. " BPM):")
+for i, p in ipairs(PATTERNS) do
+    local arrow = (i == patternIndex) and "►" or " "
+    print(string.format("     %s %d. %s", arrow, i, p.name))
+end
+print("──────────────────────────────────────────────")
+print("  🎵 EYELESS Song Structure (" .. EYELESS.bpm .. " BPM):")
+print("")
+print("  🎬 Intro ──► 🎸 Verse 1 ──► 🔥 Chorus 1")
+print("       │")
+print("  🎸 Verse 2 ──► ⚡ Pre-Chorus ──► 🔥 Chorus 2")
+print("       │")
+print("  💀 Breakdown ──► 🔥 Final Chorus ──► 🏁 Outro")
+print("       │")
+print("       └──────── 🔄 Loop ────────────────────┘")
+print("")
+print("──────────────────────────────────────────────")
+print("  ⚠  Jika drum tidak bunyi, sesuaikan tabel")
+print("     KEYS di dalam script sesuai game!")
+print("══════════════════════════════════════════════")
+print("\n")
