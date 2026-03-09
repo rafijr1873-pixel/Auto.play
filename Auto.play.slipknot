@@ -1,0 +1,469 @@
+--[[
+╔════════════════════════════════════════════════╗
+║  🥁 AUTO DRUM v2.0 — Virtual Drums            ║
+║  Patterns: Rock 120BPM | Slipknot Eyeless 142 ║
+║  Mobile: Delta/Fluxus/Arceus X/Codex/Hydrogen  ║
+║  Toggle: P key or tap GUI button               ║
+╚════════════════════════════════════════════════╝
+]]
+
+-- ══════════════════════════════════════
+-- CLEANUP PREVIOUS INSTANCE
+-- ══════════════════════════════════════
+if _G._AutoDrumActive then
+    _G._AutoDrumActive = false
+    task.wait(0.6)
+end
+local plr = game:GetService("Players").LocalPlayer
+local pgui = plr:WaitForChild("PlayerGui")
+if pgui:FindFirstChild("DrumGUI") then
+    pgui.DrumGUI:Destroy()
+    task.wait(0.1)
+end
+
+-- ══════════════════════════════════════
+-- SERVICES
+-- ══════════════════════════════════════
+local VIM = game:GetService("VirtualInputManager")
+local UIS = game:GetService("UserInputService")
+
+-- ══════════════════════════════════════
+-- KEYBINDS (Virtual Drums QWERTY)
+-- ══════════════════════════════════════
+local K = {
+    Kick     = Enum.KeyCode.B,
+    Kick2    = Enum.KeyCode.N,
+    Snare    = Enum.KeyCode.C,
+    Snare2   = Enum.KeyCode.V,
+    SnareS   = Enum.KeyCode.S,
+    HHC      = Enum.KeyCode.X,
+    HHC2     = Enum.KeyCode.M,
+    HHO      = Enum.KeyCode.Z,
+    Tom1     = Enum.KeyCode.D,
+    Tom1B    = Enum.KeyCode.F,
+    Tom2     = Enum.KeyCode.G,
+    Tom2B    = Enum.KeyCode.H,
+    Tom3     = Enum.KeyCode.J,
+    Tom3B    = Enum.KeyCode.K,
+    CrashL   = Enum.KeyCode.E,
+    CrashR   = Enum.KeyCode.R,
+    Ride     = Enum.KeyCode.U,
+    RideBell = Enum.KeyCode.I,
+    China    = Enum.KeyCode.O,
+    Splash   = Enum.KeyCode.W,
+    Cowbell  = Enum.KeyCode.A,
+}
+
+-- ══════════════════════════════════════
+-- STATE & RNG
+-- ══════════════════════════════════════
+_G._AutoDrumActive = false
+local barCount = 0
+local pIdx = 1
+local RNG = Random.new(tick())
+local PATTERNS = {} -- populated below
+
+-- ══════════════════════════════════════
+-- CORE HELPERS
+-- ══════════════════════════════════════
+local function humanize()
+    local ms = RNG:NextInteger(25, 70)
+    local sign = (RNG:NextInteger(0, 1) == 0) and 1 or -1
+    return (ms / 1000) * sign
+end
+
+local function getHold()
+    return RNG:NextInteger(55, 115) / 1000
+end
+
+local function hit(keys)
+    if typeof(keys) == "EnumItem" then keys = {keys} end
+    for i = 1, #keys do
+        VIM:SendKeyEvent(true, keys[i], false, game)
+    end
+    task.wait(getHold())
+    for i = 1, #keys do
+        VIM:SendKeyEvent(false, keys[i], false, game)
+    end
+end
+
+local function waitStep()
+    local d = 60 / PATTERNS[pIdx].bpm / 2 + humanize()
+    if d < 0.05 then d = 0.05 end
+    task.wait(d)
+end
+
+local function alive()
+    return _G._AutoDrumActive
+end
+
+-- hit → wait → check alive (returns false = stop)
+local function stepC(keys)
+    hit(keys)
+    waitStep()
+    return alive()
+end
+
+-- hit → wait (last step, no check)
+local function stepL(keys)
+    hit(keys)
+    waitStep()
+end
+
+-- ══════════════════════════════════════
+-- PATTERN 1: ROCK BEAT — 120 BPM
+-- ══════════════════════════════════════
+--[[
+  Count:  1     &     2     &     3     &     4     &
+  HH:    [X]   [X]   [X]   [X]   [X]  X/Z   [X]   [X]
+  Kick:  [B]               [B]
+  Snare:             [C]                     [C]+G?
+  Crash: 20% every 8 bars on beat 1
+  Ride:  10% replaces HH on & of 2
+]]
+local function rockBar()
+    barCount = barCount + 1
+    local doCrash = (barCount % 8 == 1) and (RNG:NextNumber() < 0.20)
+
+    -- Beat 1: Kick + HH (+ crash?)
+    local s1 = {K.Kick, K.HHC}
+    if doCrash then
+        s1[#s1 + 1] = (RNG:NextInteger(0, 1) == 0) and K.CrashR or K.CrashL
+    end
+    if not stepC(s1) then return end
+
+    -- & of 1: HH
+    if not stepC(K.HHC) then return end
+
+    -- Beat 2: Snare + HH
+    if not stepC({K.Snare, K.HHC}) then return end
+
+    -- & of 2: HH (10% ride)
+    local cym4 = (RNG:NextNumber() < 0.10) and K.Ride or K.HHC
+    if not stepC(cym4) then return end
+
+    -- Beat 3: Kick + HH
+    if not stepC({K.Kick, K.HHC}) then return end
+
+    -- & of 3: HH open 30% or closed
+    local cym6 = (RNG:NextNumber() < 0.30) and K.HHO or K.HHC
+    if not stepC(cym6) then return end
+
+    -- Beat 4: Snare + HH (+ Tom2 40%)
+    local s7 = {K.Snare, K.HHC}
+    if RNG:NextNumber() < 0.40 then s7[#s7 + 1] = K.Tom2 end
+    if not stepC(s7) then return end
+
+    -- & of 4: HH
+    stepL(K.HHC)
+end
+
+-- ══════════════════════════════════════
+-- PATTERN 2: SLIPKNOT — EYELESS — 142 BPM
+-- ══════════════════════════════════════
+-- Cycle: 4 bars Verse → 4 bars Chorus → 1 bar Fill = 9 bars
+
+--[[
+  ─── VERSE: alternating double bass + ride bell ───
+  Count:  1     &     2     &     3     &     4     &
+  Kick:  [B]   [N]   [B]   [N]   [B]   [N]   [B]   [N]  ← alternating!
+  Snare:              [C]                     [C]
+  Cymbal:[I]   [I]   [I]   [I]   [I]  I/O   [I]   [I]
+  Ghost snare (V) 15% on beat 3 · China (O) 20% on & of 3
+]]
+local function eyeVerse()
+    -- Beat 1: right foot + ride bell
+    if not stepC({K.Kick, K.RideBell}) then return end
+    -- & of 1: left foot + ride bell
+    if not stepC({K.Kick2, K.RideBell}) then return end
+    -- Beat 2: snare + right foot + ride bell
+    if not stepC({K.Snare, K.Kick, K.RideBell}) then return end
+    -- & of 2: left foot + ride bell
+    if not stepC({K.Kick2, K.RideBell}) then return end
+    -- Beat 3: right foot + ride bell (15% ghost snare)
+    local s5 = {K.Kick, K.RideBell}
+    if RNG:NextNumber() < 0.15 then s5[#s5 + 1] = K.Snare2 end
+    if not stepC(s5) then return end
+    -- & of 3: left foot + ride bell (20% china instead)
+    local c6 = (RNG:NextNumber() < 0.20) and K.China or K.RideBell
+    if not stepC({K.Kick2, c6}) then return end
+    -- Beat 4: snare + right foot + ride bell
+    if not stepC({K.Snare, K.Kick, K.RideBell}) then return end
+    -- & of 4: left foot + ride bell
+    stepL({K.Kick2, K.RideBell})
+end
+
+--[[
+  ─── CHORUS: both kicks on accents + china/crashes ───
+  Count:  1      &     2      &     3     &     4      &
+  Kick:  [B+N]  [B]   [N]    [B]   [N]   [B]   [N]   [B+N]
+  Snare:               [C]                      [C]
+  Cymbal: [O]   [O]   [R]          [O]  W?     [E]
+  Splash (W) 25% on & of 3
+]]
+local function eyeChorus()
+    -- Beat 1: BOTH kicks + china (heavy accent)
+    if not stepC({K.Kick, K.Kick2, K.China}) then return end
+    -- & of 1: right foot + china
+    if not stepC({K.Kick, K.China}) then return end
+    -- Beat 2: snare + left foot + crash right
+    if not stepC({K.Snare, K.Kick2, K.CrashR}) then return end
+    -- & of 2: right foot
+    if not stepC(K.Kick) then return end
+    -- Beat 3: left foot + china
+    if not stepC({K.Kick2, K.China}) then return end
+    -- & of 3: right foot (25% splash)
+    local s6 = {K.Kick}
+    if RNG:NextNumber() < 0.25 then s6[#s6 + 1] = K.Splash end
+    if not stepC(s6) then return end
+    -- Beat 4: snare + left foot + crash left
+    if not stepC({K.Snare, K.Kick2, K.CrashL}) then return end
+    -- & of 4: BOTH kicks (accent into next bar)
+    stepL({K.Kick, K.Kick2})
+end
+
+--[[
+  ─── FILL: descending tom run + massive crash ending ───
+  Tom1 → Tom1B → Tom2 → Tom2B → Tom3 → Tom3B → Snare → BIG CRASH
+  Kicks alternate throughout
+]]
+local function eyeFill()
+    if not stepC({K.Tom1, K.Kick}) then return end
+    if not stepC({K.Tom1B, K.Kick2}) then return end
+    if not stepC({K.Tom2, K.Kick}) then return end
+    if not stepC({K.Tom2B, K.Kick2}) then return end
+    if not stepC({K.Tom3, K.Kick}) then return end
+    if not stepC({K.Tom3B, K.Kick2}) then return end
+    if not stepC({K.Snare, K.SnareS, K.Kick, K.Kick2}) then return end
+    -- MASSIVE ending: all crashes + both kicks
+    stepL({K.CrashL, K.CrashR, K.China, K.Kick, K.Kick2})
+end
+
+-- Eyeless bar dispatcher (9-bar cycle)
+local function eyelessBar()
+    barCount = barCount + 1
+    local pos = (barCount - 1) % 9 + 1
+
+    if pos <= 4 then
+        eyeVerse()      -- Bars 1-4: Verse
+    elseif pos <= 8 then
+        eyeChorus()     -- Bars 5-8: Chorus
+    else
+        eyeFill()       -- Bar 9: Fill transition
+    end
+end
+
+-- ══════════════════════════════════════
+-- REGISTER PATTERNS
+-- ══════════════════════════════════════
+PATTERNS = {
+    {name = "Rock",    bpm = 120, play = rockBar},
+    {name = "Eyeless", bpm = 142, play = eyelessBar},
+}
+
+-- ══════════════════════════════════════
+-- START / STOP
+-- ══════════════════════════════════════
+local function startDrum()
+    if _G._AutoDrumActive then return end
+    _G._AutoDrumActive = true
+    barCount = 0
+    task.spawn(function()
+        while _G._AutoDrumActive do
+            local ok, err = pcall(PATTERNS[pIdx].play)
+            if not ok then
+                warn("[AutoDrum] " .. tostring(err))
+                task.wait(0.3)
+            end
+        end
+    end)
+end
+
+local function stopDrum()
+    _G._AutoDrumActive = false
+    pcall(function()
+        for _, kc in pairs(K) do
+            VIM:SendKeyEvent(false, kc, false, game)
+        end
+    end)
+end
+
+-- ══════════════════════════════════════
+-- COMPACT GUI (168 × 85 px)
+-- ══════════════════════════════════════
+local gui = Instance.new("ScreenGui")
+gui.Name = "DrumGUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = pgui
+
+-- Main Frame (tiny, draggable)
+local fr = Instance.new("Frame")
+fr.Size = UDim2.new(0, 168, 0, 85)
+fr.Position = UDim2.new(0.5, -84, 0, 8)
+fr.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
+fr.BackgroundTransparency = 0.04
+fr.BorderSizePixel = 0
+fr.Active = true
+fr.Draggable = true
+fr.Parent = gui
+Instance.new("UICorner", fr).CornerRadius = UDim.new(0, 10)
+local frStroke = Instance.new("UIStroke", fr)
+frStroke.Color = Color3.fromRGB(255, 160, 0)
+frStroke.Thickness = 1.5
+
+-- ── Title ──
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -26, 0, 20)
+title.Position = UDim2.new(0, 8, 0, 1)
+title.BackgroundTransparency = 1
+title.Text = "🥁 AutoDrum"
+title.TextColor3 = Color3.fromRGB(255, 200, 50)
+title.TextSize = 11
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = fr
+
+-- ── Close Button (tiny ✕) ──
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 18, 0, 18)
+closeBtn.Position = UDim2.new(1, -22, 0, 2)
+closeBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+closeBtn.BackgroundTransparency = 0.25
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.TextSize = 9
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = fr
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+-- ── Toggle Button ──
+local togBtn = Instance.new("TextButton")
+togBtn.Size = UDim2.new(0, 80, 0, 30)
+togBtn.Position = UDim2.new(0, 6, 0, 24)
+togBtn.BackgroundColor3 = Color3.fromRGB(0, 155, 50)
+togBtn.Text = "▶ PLAY"
+togBtn.TextColor3 = Color3.new(1, 1, 1)
+togBtn.TextSize = 13
+togBtn.Font = Enum.Font.GothamBold
+togBtn.Parent = fr
+Instance.new("UICorner", togBtn).CornerRadius = UDim.new(0, 8)
+
+-- ── Pattern Cycle Button ──
+local patBtn = Instance.new("TextButton")
+patBtn.Size = UDim2.new(0, 72, 0, 30)
+patBtn.Position = UDim2.new(0, 90, 0, 24)
+patBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 75)
+patBtn.Text = "Rock ▸"
+patBtn.TextColor3 = Color3.fromRGB(195, 195, 255)
+patBtn.TextSize = 11
+patBtn.Font = Enum.Font.GothamBold
+patBtn.Parent = fr
+Instance.new("UICorner", patBtn).CornerRadius = UDim.new(0, 8)
+
+-- ── Status Label ──
+local stat = Instance.new("TextLabel")
+stat.Size = UDim2.new(1, -8, 0, 16)
+stat.Position = UDim2.new(0, 4, 0, 60)
+stat.BackgroundTransparency = 1
+stat.Text = "⏹ 120BPM · Bar:0"
+stat.TextColor3 = Color3.fromRGB(130, 130, 130)
+stat.TextSize = 10
+stat.Font = Enum.Font.Gotham
+stat.Parent = fr
+
+-- ══════════════════════════════════════
+-- GUI REFRESH
+-- ══════════════════════════════════════
+local function refreshGUI()
+    local p = PATTERNS[pIdx]
+    patBtn.Text = p.name .. " ▸"
+
+    if _G._AutoDrumActive then
+        togBtn.Text = "⏸ STOP"
+        togBtn.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+        stat.TextColor3 = Color3.fromRGB(80, 255, 90)
+    else
+        togBtn.Text = "▶ PLAY"
+        togBtn.BackgroundColor3 = Color3.fromRGB(0, 155, 50)
+        stat.TextColor3 = Color3.fromRGB(130, 130, 130)
+    end
+
+    stat.Text = (_G._AutoDrumActive and "▶ " or "⏹ ")
+        .. p.bpm .. "BPM · Bar:" .. barCount
+end
+
+-- Live bar counter update
+task.spawn(function()
+    while gui and gui.Parent do
+        if _G._AutoDrumActive then
+            pcall(function()
+                local p = PATTERNS[pIdx]
+                stat.Text = "▶ " .. p.bpm .. "BPM · Bar:" .. barCount
+            end)
+        end
+        task.wait(0.25)
+    end
+end)
+
+-- ══════════════════════════════════════
+-- TOGGLE & PATTERN SWITCH
+-- ══════════════════════════════════════
+local function toggle()
+    if _G._AutoDrumActive then
+        stopDrum()
+    else
+        startDrum()
+    end
+    refreshGUI()
+end
+
+local function cyclePattern()
+    local wasPlaying = _G._AutoDrumActive
+    if wasPlaying then
+        stopDrum()
+        task.wait(0.15)
+    end
+    pIdx = (pIdx % #PATTERNS) + 1
+    barCount = 0
+    refreshGUI()
+    if wasPlaying then
+        startDrum()
+        refreshGUI()
+    end
+end
+
+-- ══════════════════════════════════════
+-- INPUT CONNECTIONS
+-- ══════════════════════════════════════
+togBtn.MouseButton1Click:Connect(toggle)
+patBtn.MouseButton1Click:Connect(cyclePattern)
+
+local keyConn = UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.P then
+        toggle()
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    stopDrum()
+    task.wait(0.1)
+    if gui then gui:Destroy() end
+    if keyConn then keyConn:Disconnect() end
+    _G._AutoDrumActive = nil
+    print("[AutoDrum] 🗑️ Unloaded.")
+end)
+
+-- ══════════════════════════════════════
+-- STARTUP
+-- ══════════════════════════════════════
+refreshGUI()
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "🥁 Auto Drum v2",
+        Text = "Tap PLAY or press P · Rock / Eyeless",
+        Duration = 4,
+    })
+end)
+print("[AutoDrum] ✅ Loaded — Rock 120BPM | Eyeless 142BPM")
